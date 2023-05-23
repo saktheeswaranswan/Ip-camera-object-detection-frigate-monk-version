@@ -4,8 +4,15 @@ import logging
 from pathlib import Path
 import shutil
 import threading
-
+import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
+from botocore.session import Session as boto_session
+from botocore.exceptions import BotoCoreError, ClientError
 from peewee import fn
+import os
+import tempfile
+
 
 from frigate.config import FrigateConfig
 from frigate.const import RECORD_DIR
@@ -15,6 +22,98 @@ logger = logging.getLogger(__name__)
 bandwidth_equation = Recordings.segment_size / (
     Recordings.end_time - Recordings.start_time
 )
+
+
+class StorageS3:
+    def __init__(self, config: FrigateConfig) -> None:
+        self.config = config
+        if self.config.storage.s3.enabled or self.config.storage.s3.archive:
+            if self.config.storage.s3.endpoint_url.startswith("http://"):
+                try:
+                    session = boto_session()
+                    session.set_config_variable(
+                        "s3",
+                        {
+                            "use_ssl": False,
+                            "verify": False,
+                        },
+                    )
+                    self.s3_client = session.create_client(
+                        "s3",
+                        aws_access_key_id=self.config.storage.s3.access_key_id,
+                        aws_secret_access_key=self.config.storage.s3.secret_access_key,
+                        endpoint_url=self.config.storage.s3.endpoint_url,
+                        config=Config(),
+                    )
+                except (BotoCoreError, ClientError) as error:
+                    logger.error(f"Failed to create S3 client: {error}")
+                    return None
+            else:
+                try:
+                    self.s3_client = boto3.client(
+                        "s3",
+                        aws_access_key_id=self.config.storage.s3.access_key_id,
+                        aws_secret_access_key=self.config.storage.s3.secret_access_key,
+                        endpoint_url=self.config.storage.s3.endpoint_url,
+                    )
+                except (BotoCoreError, ClientError) as error:
+                    logger.error(f"Failed to create S3 client: {error}")
+                    return None
+
+            self.s3_bucket = self.config.storage.s3.bucket_name
+            self.s3_path = self.config.storage.s3.path
+
+    def upload_file_to_s3(self, file_path) -> str:
+        try:
+            s3_filename = self.s3_path + "/" + os.path.relpath(file_path, RECORD_DIR)
+            self.s3_client.upload_file(file_path, self.s3_bucket, s3_filename)
+            logger.debug(f"Uploading {file_path} to S3 {s3_filename}")
+        except Exception as e:
+            logger.error(
+                f"Error occurred while uploading {file_path} to S3 {s3_filename}: {e}"
+            )
+            return ""
+        return s3_filename
+
+    def download_file_from_s3(self, s3_file_name) -> str:
+        if self.config.storage.s3.enabled or self.config.storage.s3.archive:
+            # Create a temporary directory
+            temp_dir = tempfile.gettempdir()
+
+            # Create a temporary file name with the same name as the original S3 file
+            local_file_path = os.path.join(temp_dir, os.path.basename(s3_file_name))
+
+            try:
+                # Download the file from S3
+                self.s3_client.download_file(
+                    self.s3_bucket, s3_file_name, local_file_path
+                )
+                logger.debug(f"Downloaded {s3_file_name} to {local_file_path}")
+                return local_file_path
+            except Exception as e:
+                logger.error(
+                    f"Error occurred while downloading {s3_file_name} from S3: {e}"
+                )
+                return None
+        else:
+            return False
+
+    def get_bucket_stats(self):
+        try:
+            total_size = 0
+            total_files = 0
+            for obj in self.s3_client.list_objects(Bucket=self.s3_bucket).get(
+                "Contents", []
+            ):
+                total_size += obj["Size"]
+                total_files += 1
+
+            total_size_gb = total_size / (1024**3)  # Convert bytes to gigabytes
+            return {"total_files": total_files, "total_size_gb": total_size_gb}
+
+        except ClientError as e:
+            print(f"Error getting bucket stats: {e}")
+            return None
 
 
 class StorageMaintainer(threading.Thread):

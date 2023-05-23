@@ -1,6 +1,12 @@
 """Recordings Utilities."""
 
 import os
+import boto3
+import tempfile
+import logging
+from frigate.config import FrigateConfig
+
+logger = logging.getLogger(__name__)
 
 
 def remove_empty_directories(directory: str) -> None:
