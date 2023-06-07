@@ -39,7 +39,7 @@ from frigate.output import output_frames
 from frigate.plus import PlusApi
 from frigate.ptz import OnvifController
 from frigate.record.record import manage_recordings
-from frigate.stats import StatsEmitter, stats_init
+from frigate.monitoring.stats import StatsEmitter, stats_init
 from frigate.storage import StorageMaintainer
 from frigate.timeline import TimelineProcessor
 from frigate.types import CameraMetricsTypes, RecordMetricsTypes

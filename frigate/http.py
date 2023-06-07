@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from functools import reduce
 from pathlib import Path
 from urllib.parse import unquote
+from prometheus_client import REGISTRY, generate_latest, make_wsgi_app
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 import cv2
 import numpy as np
@@ -33,9 +35,12 @@ from frigate.const import CLIPS_DIR, MAX_SEGMENT_DURATION, RECORD_DIR
 from frigate.events.external import ExternalEventProcessor
 from frigate.models import Event, Recordings, Timeline
 from frigate.object_processing import TrackedObject
+from frigate.monitoring.prometheus import setupRegistry
+
+from frigate.monitoring.stats import stats_snapshot
 from frigate.plus import PlusApi
 from frigate.ptz import OnvifController
-from frigate.stats import stats_snapshot
+from frigate.monitoring.stats import stats_snapshot
 from frigate.storage import StorageMaintainer
 from frigate.util import (
     clean_camera_user_pass,
@@ -84,6 +89,10 @@ def create_app(
     app.hwaccel_errors = []
 
     app.register_blueprint(bp)
+
+    app.wsgi_app = DispatcherMiddleware(
+        app.wsgi_app, {"/metrics": make_wsgi_app(registry=setupRegistry())}
+    )
 
     return app
 
