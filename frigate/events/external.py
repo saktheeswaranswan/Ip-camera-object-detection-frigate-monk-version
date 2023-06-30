@@ -14,16 +14,23 @@ from faster_fifo import Queue
 from frigate.config import CameraConfig, FrigateConfig
 from frigate.const import CLIPS_DIR
 from frigate.events.maintainer import EventTypeEnum
+from frigate.object_processing import TrackedObjectProcessor
 from frigate.util import draw_box_with_label
 
 logger = logging.getLogger(__name__)
 
 
 class ExternalEventProcessor:
-    def __init__(self, config: FrigateConfig, queue: Queue) -> None:
+    def __init__(
+        self,
+        config: FrigateConfig,
+        queue: Queue,
+        detected_frames_processor: TrackedObjectProcessor,
+    ) -> None:
         self.config = config
         self.queue = queue
         self.default_thumbnail = None
+        self.detected_frames_processor = detected_frames_processor
 
     def create_manual_event(
         self,
@@ -128,3 +135,57 @@ class ExternalEventProcessor:
         thumb = cv2.resize(img_frame, dsize=(width, 175), interpolation=cv2.INTER_AREA)
         ret, jpg = cv2.imencode(".jpg", thumb)
         return base64.b64encode(jpg.tobytes()).decode("utf-8")
+
+    def create_event(self, camera_name: str, label: str, body: dict[str, any] = {}):
+        if not camera_name or not self.config.cameras.get(camera_name):
+            return {
+                "success": False,
+                "error": 404,
+                "message": f"{camera_name} is not a valid camera.",
+            }
+
+        if not label:
+            return {
+                "success": False,
+                "error": 404,
+                "message": f"{label} must be set.",
+            }
+
+        try:
+            frame = self.detected_frames_processor.get_current_frame(camera_name)
+
+            event_id = self.external_processor.create_manual_event(
+                camera_name,
+                label,
+                body.get("sub_label", None),
+                body.get("duration", 30),
+                body.get("include_recording", True),
+                body.get("draw", {}),
+                frame,
+            )
+        except Exception as e:
+            logger.error(f"The error is {e}")
+            return {
+                "success": False,
+                "error": 404,
+                "message": f"An unknown error occurred: {e}",
+            }
+
+        return {
+            "success": True,
+            "message": "Successfully created event.",
+            "event_id": event_id,
+        }
+
+    def end_event(self, event_id: str, body: dict[str, any] = {}):
+        try:
+            end_time = body.get("end_time", datetime.now().timestamp())
+            self.finish_manual_event(event_id, end_time)
+        except Exception:
+            return {
+                "success": False,
+                "error": 404,
+                "message": f"{event_id} must be set and valid.",
+            }
+
+        return {"success": True, "message": "Event successfully ended."}
