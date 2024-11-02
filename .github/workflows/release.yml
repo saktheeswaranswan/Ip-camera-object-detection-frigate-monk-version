@@ -16,7 +16,7 @@ jobs:
         with:
           string: ${{ github.repository }}
       - name: Log in to the Container registry
-        uses: docker/login-action@0d4c9c5ea7693da7b068278f7b52bda2a190a446
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -34,14 +34,14 @@ jobs:
           STABLE_TAG=${BASE}:stable
           PULL_TAG=${BASE}:${BUILD_TAG}
           docker run --rm -v $HOME/.docker/config.json:/config.json quay.io/skopeo/stable:latest copy --authfile /config.json --multi-arch all docker://${PULL_TAG} docker://${VERSION_TAG}
-          for variant in standard-arm64 tensorrt tensorrt-jp4 tensorrt-jp5 rk; do
+          for variant in standard-arm64 tensorrt tensorrt-jp4 tensorrt-jp5 rk h8l rocm; do
             docker run --rm -v $HOME/.docker/config.json:/config.json quay.io/skopeo/stable:latest copy --authfile /config.json --multi-arch all docker://${PULL_TAG}-${variant} docker://${VERSION_TAG}-${variant}
           done
 
           # stable tag
           if [[ "${BUILD_TYPE}" == "stable" ]]; then
             docker run --rm -v $HOME/.docker/config.json:/config.json quay.io/skopeo/stable:latest copy --authfile /config.json --multi-arch all docker://${PULL_TAG} docker://${STABLE_TAG}
-            for variant in standard-arm64 tensorrt tensorrt-jp4 tensorrt-jp5 rk; do
+            for variant in standard-arm64 tensorrt tensorrt-jp4 tensorrt-jp5 rk h8l rocm; do
               docker run --rm -v $HOME/.docker/config.json:/config.json quay.io/skopeo/stable:latest copy --authfile /config.json --multi-arch all docker://${PULL_TAG}-${variant} docker://${STABLE_TAG}-${variant}
             done
           fi
